@@ -1,0 +1,19 @@
+{
+  "_": "This repository's own README numbers, checked by the tool itself in CI.",
+  "claims": [
+    {
+      "id": "test_count",
+      "claim": "Tests in the suite",
+      "value": "119 tests",
+      "format": "%d tests",
+      "derive": {"files": ["tests/test_*.py"], "tests": "python"},
+      "status": "measured",
+      "anchor": "test methods in tests/, counted by parsing",
+      "checked_on": "2026-09-25",
+      "durable": "read from source on every verify",
+      "appears_in": ["README.md"],
+      "near": ["unittest discover"],
+      "window": 80
+    }
+  ]
+}

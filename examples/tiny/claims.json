@@ -1,0 +1,43 @@
+{
+  "claims": [
+    {
+      "id": "max_retries",
+      "claim": "How many times a failed request is retried",
+      "value": "at most 5 times",
+      "format": "at most %d times",
+      "derive": {"files": ["src/limits.py"], "capture": "^MAX_RETRIES = (\\d+)"},
+      "status": "measured",
+      "anchor": "MAX_RETRIES in src/limits.py",
+      "checked_on": "2026-09-25",
+      "durable": "read from source on every verify",
+      "appears_in": ["README.md"],
+      "near": ["retries"]
+    },
+    {
+      "id": "formats",
+      "claim": "Input formats the reader accepts",
+      "value": "3 formats",
+      "format": "%d formats",
+      "derive": {"files": ["src/limits.py"], "count": "^    \"[a-z]+\",$"},
+      "status": "measured",
+      "anchor": "entries in FORMATS, src/limits.py",
+      "checked_on": "2026-09-25",
+      "durable": "read from source on every verify",
+      "appears_in": ["README.md"],
+      "near": ["formats"]
+    },
+    {
+      "id": "tests",
+      "claim": "Tests in the suite",
+      "value": "3 tests",
+      "format": "%d tests",
+      "derive": {"files": ["tests/test_*.py"], "tests": "python"},
+      "status": "measured",
+      "anchor": "test methods in tests/, counted by parsing",
+      "checked_on": "2026-09-25",
+      "durable": "read from source on every verify",
+      "appears_in": ["README.md"],
+      "near": ["tests"]
+    }
+  ]
+}
