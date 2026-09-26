@@ -4,7 +4,7 @@
     {
       "id": "test_count",
       "claim": "Tests in the suite",
-      "value": "119 tests",
+      "value": "127 tests",
       "format": "%d tests",
       "derive": {"files": ["tests/test_*.py"], "tests": "python"},
       "status": "measured",

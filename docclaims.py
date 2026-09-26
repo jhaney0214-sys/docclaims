@@ -84,7 +84,7 @@ Standard library only, one file, Python 3.8 or later. Copying this file into a
 repository is a supported way to use it.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 import argparse
 import ast
@@ -1018,15 +1018,18 @@ def main(argv=None):
         except LedgerError as exc:
             print("FAIL  ledger         %s" % exc)
             return 1
+        if not args.scan:
+            # A finding rather than a printed hint, so it is counted in the
+            # summary and carried into --json like every other NOT CHECKED.
+            findings.append(Finding(
+                "coverage", "-", "NOT CHECKED: pass --scan to sweep for files "
+                "that quote a claim and are not pinned to it", fatal=False))
         fatal, notes = _report(findings, args.quiet)
         if args.json:
             with io.open(args.json, "w", encoding="utf-8") as handle:
                 json.dump({"project": str(root), "claims": len(claims),
                            "findings": [f.as_dict() for f in findings]},
                           handle, indent=2)
-        if not args.scan:
-            print("note  coverage       NOT CHECKED: pass --scan to sweep for "
-                  "files that quote a claim and are not pinned to it")
         # How a number is anchored is worth printing every run. A ledger that
         # slid from recomputable to transcript-only would otherwise look
         # identical from here, and that slide is a real weakening.

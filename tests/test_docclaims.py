@@ -784,7 +784,24 @@ class TheCommandLine(TemporaryProject):
         self.put_ledger([a_claim()])
         code, out = self.run_main(["verify", str(self.root)])
         self.assertEqual(code, 0, out)
+        # The one note is that coverage was not swept.
+        self.assertIn("0 failures, 1 notes", out)
+
+    def test_an_unswept_coverage_check_is_counted_and_carried_into_json(self):
+        self.put_ledger([a_claim()])
+        report = str(self.root / "out.json")
+        self.run_main(["verify", str(self.root), "--json", report])
+        with io.open(report, encoding="utf-8") as handle:
+            found = json.load(handle)["findings"]
+        self.assertTrue(any(f["kind"] == "coverage" and "NOT CHECKED" in
+                            f["message"] and not f["fatal"] for f in found))
+        code, out = self.run_main(["verify", str(self.root), "--scan", "*.md"])
         self.assertIn("0 failures, 0 notes", out)
+
+    def test_render_with_no_ledger_exits_one(self):
+        code, out = self.run_main(["render", str(self.root)])
+        self.assertEqual(code, 1)
+        self.assertIn("no ledger", out)
 
     def test_the_summary_says_how_the_claims_are_anchored(self):
         """A ledger sliding from recomputable to transcript-only is a real
@@ -1040,6 +1057,45 @@ class Derived(TemporaryProject):
         with redirect_stdout(out):
             claims.main(["verify", str(self.root)])
         self.assertIn("0 recomputable, 1 read from source", out.getvalue())
+
+
+class Edges(unittest.TestCase):
+    """Found by mutation testing: behaviour nothing else pinned."""
+
+    def test_an_excerpt_marks_what_it_cut_and_nothing_else(self):
+        self.assertEqual(claims.excerpt("abcdefghij", 4, 6, margin=2),
+                         "...cdefgh...")
+        self.assertEqual(claims.excerpt("abcdefghij", 0, 2, margin=2), "abcd...")
+        self.assertEqual(claims.excerpt("abcdefghij", 8, 10, margin=2),
+                         "...ghij")
+
+    def test_an_allow_list_with_no_near_is_a_note_not_a_failure(self):
+        found = [f for f in claims.check_schema(
+            [a_claim(near=[], allow={"12.4%": "a different, correct figure"})])
+            if "`allow`" in f.message]
+        self.assertEqual(len(found), 1)
+        self.assertFalse(found[0].fatal)
+
+    def test_no_window_and_no_near_says_nothing_about_windows(self):
+        found = claims.check_schema([a_claim(near=[])])
+        self.assertFalse(any("`window`" in f.message for f in found))
+
+    def test_the_default_tolerance_is_a_rounding_error_not_a_change(self):
+        claim = a_claim()
+        near = claim["raw"] + 5e-13
+        self.assertEqual(claims.check_computed([claim], {claim["id"]: near}), [])
+        self.assertTrue(claims.check_computed(
+            [claim], {claim["id"]: claim["raw"] + 5e-12}))
+
+    def test_a_difference_exactly_at_the_tolerance_passes(self):
+        claim = a_claim(raw=1.0, tolerance=0.25)
+        self.assertEqual(claims.check_computed([claim], {claim["id"]: 1.25}), [])
+        self.assertTrue(claims.check_computed([claim], {claim["id"]: 1.5}))
+
+    def test_the_html_table_marks_only_the_status_column(self):
+        html = claims.render([a_claim()], "html")
+        self.assertEqual(html.count('class="claim-status"'), 1)
+        self.assertIn('<td class="claim-status">measured</td>', html)
 
 
 if __name__ == "__main__":

@@ -177,7 +177,7 @@ sure the assertion is stated, dated and consistent everywhere it appears.
 ## Development
 
 ```bash
-PYTHONPATH=. python -m unittest discover -s tests   # 119 tests
+PYTHONPATH=. python -m unittest discover -s tests   # 127 tests
 python docclaims.py verify . --scan "*.md"          # this README against its ledger
 ```
 
