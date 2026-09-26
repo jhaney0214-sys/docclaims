@@ -12,6 +12,7 @@ what each one is, how it is known, and where it comes from.
     docclaims verify . --scan "**/*.md"      # and find unpinned copies
     docclaims stale . --asof 2027-01-01      # claims past their re-check date
     docclaims render . --format md           # a table of every claim
+    docclaims suggest README.md              # draft claims, for review
 
 ## The chain
 
@@ -90,7 +91,7 @@ Standard library only, one file, Python 3.8 or later. Copying this file into a
 repository is a supported way to use it.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 import argparse
 import ast
@@ -111,7 +112,7 @@ STATUSES = ("measured", "estimated", "modeled", "unconfirmed")
 REQUIRED = ("id", "claim", "value", "status", "anchor", "checked_on")
 OPTIONAL = ("recheck_by", "appears_in", "raw", "format", "scale", "near",
             "window", "allow", "durable", "notes", "tolerance", "evidence",
-            "also_written", "derive")
+            "also_written", "derive", "todo")
 
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 NUMBER = re.compile(r"\d+(?:\.\d+)?")
@@ -351,6 +352,12 @@ def check_schema(claims):
             if not claim.get(field):
                 findings.append(Finding(
                     "schema", claim_id, "missing required field %r" % field))
+
+        if claim.get("todo"):
+            # Written by `suggest`. A draft must fail until a person has read
+            # it, or suggesting claims would be discovering them.
+            findings.append(Finding(
+                "schema", claim_id, "still a draft: %s" % claim["todo"]))
 
         unknown = set(claim) - set(REQUIRED) - set(OPTIONAL)
         for field in sorted(unknown):
@@ -1092,6 +1099,232 @@ def _report(findings, quiet=False):
     return fatal, notes
 
 
+# ---------------------------------------------------------------------------
+# suggest: draft a ledger from prose that has none.
+#
+# Claims are declared, not discovered, and this does not change that. It finds
+# candidates and writes DRAFTS, every one carrying a `todo` that `verify`
+# reports as a failure until a person has read the claim and deleted the line.
+# A drafting tool whose output passed unreviewed would be the discovery flood
+# this tool refuses to be, with extra steps.
+
+#: A number, optionally with thousands separators or decimals, optionally with
+#: a %/x suffix, optionally followed by one lowercase word - the unit that
+#: makes "138 tests" a claim and a bare "138" usually not one.
+CANDIDATE = re.compile(
+    r"(?<![\w.,/#$-])"
+    r"(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)"
+    r"(?![.,]\d)"
+    # The suffix before the word-boundary check: "2.5x" is a multiplier, and
+    # checking for a following letter first rejected every one of them.
+    r"(%|×|x)?(?![\w-])"
+    r"(?:[ \t]+([a-z][a-z-]{1,}))?")
+
+#: Words after a number that are grammar, not a unit.
+NOT_UNITS = frozenset("""a an and are as at be but by for from if in into is it
+of on or so than that the then this to was were which with""".split())
+
+#: Stripped before scanning: addresses, link targets and inline code, where a
+#: digit is an identifier rather than a claim.
+NOT_PROSE = re.compile(r"https?://\S+|\]\([^)]*\)|`[^`\n]*`")
+LIST_ITEM = re.compile(r"^\s*\d+[.)]\s")
+SOURCE_SUFFIXES = (".py", ".js", ".ts", ".go", ".rs", ".rb", ".java", ".kt",
+                   ".toml", ".cfg", ".ini", ".yaml", ".yml", ".json", ".gd")
+SKIP_DIRS = frozenset((".git", "node_modules", ".venv", "venv", "__pycache__",
+                       "build", "dist", ".tox", ".mypy_cache"))
+
+
+def _is_unit(word, digits, suffix):
+    """Whether the word after a number names what is counted.
+
+    A percentage or a multiplier describes itself, so it takes no unit ("15%
+    against" is a sentence, not a claim). Otherwise a unit is nearly always a
+    plural noun: "27 routes", "160 currencies". Requiring the plural, except
+    after 1, removes the verbs and adjectives that follow a number far more
+    often than units do - "150 have", "20 positioned", "18 real" - measured on
+    a real README, where they were most of the noise.
+    """
+    if suffix or word in NOT_UNITS or word.endswith(("ed", "ly", "ing")):
+        return False
+    return word.endswith("s") or digits == "1"
+
+
+def find_candidates(text):
+    """(line, value, number, unit) for each number in prose that reads like a claim."""
+    out = []
+    fenced = False
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced:
+            # Inside a code block a number is usually output or code. Only a
+            # comment is prose - "# 138 tests" beside a test command is a claim.
+            if "#" not in line:
+                continue
+            line = line.split("#", 1)[1]
+        if LIST_ITEM.match(line):
+            line = LIST_ITEM.sub(" ", line, count=1)
+        line = NOT_PROSE.sub(" ", line)
+        for match in CANDIDATE.finditer(line):
+            digits, suffix, unit = match.groups()
+            if unit is not None and not _is_unit(unit, digits, suffix):
+                unit = None
+            if not suffix and not unit:
+                continue          # a bare number: usually not a claim
+            number = float(digits.replace(",", "")) if "." in digits \
+                else int(digits.replace(",", ""))
+            if isinstance(number, int) and 1900 <= number <= 2099 \
+                    and "," not in digits:
+                continue          # a year
+            value = digits + (suffix or "") + (" " + unit if unit else "")
+            out.append((lineno, value, number, unit))
+    return out
+
+
+def _source_files(root):
+    for path in sorted(pathlib.Path(root).rglob("*")):
+        if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        if path.is_file() and path.suffix in SOURCE_SUFFIXES \
+                and path.stat().st_size < 1000000:
+            yield path
+
+
+def _python_test_globs(root):
+    root = pathlib.Path(root)
+    return [g for g in ("tests/**/test_*.py", "tests/**/*_test.py",
+                        "test/**/test_*.py", "test_*.py")
+            if any(p.is_file() for p in root.glob(g))]
+
+
+def propose_source(root, number, unit):
+    """A `derive` that re-derives this exact number, or None.
+
+    Only a proposal that was run and reproduced the number is returned. A
+    plausible-looking source that gives a different number is worse than none.
+    """
+    if not isinstance(number, int):
+        return None
+    if unit in ("test", "tests"):
+        globs = _python_test_globs(root)
+        for style in ("pytest", "python"):
+            if not globs:
+                break
+            spec = {"files": globs, "tests": style}
+            try:
+                if derive_number(root, spec) == number:
+                    return spec
+            except NotDerived:
+                continue
+        return None
+    constant = re.compile(r"^\s*(?:const\s+|export\s+const\s+)?"
+                          r"([A-Z][A-Z0-9_]{2,})\s*(?::\s*\w+\s*)?[:=]=?\s*"
+                          r"%d\s*[,;]?\s*(?:#.*|//.*)?$" % number, re.MULTILINE)
+    for path in _source_files(root):
+        try:
+            with io.open(str(path), encoding="utf-8") as handle:
+                text = handle.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for match in constant.finditer(text):
+            name = match.group(1)
+            relative = path.relative_to(root).as_posix()
+            spec = {"files": [relative],
+                    "capture": r"^\s*(?:const\s+|export\s+const\s+)?%s\s*"
+                               r"(?::\s*\w+\s*)?[:=]=?\s*(\d+)" % re.escape(name)}
+            try:
+                if derive_number(root, spec) == number:
+                    return spec
+            except NotDerived:
+                continue      # the name is assigned twice: ambiguous, skip it
+    return None
+
+
+def _format_for(value, number):
+    """A format that renders `number` back into exactly `value`."""
+    digits = re.match(r"[\d,.]+", value).group(0)
+    rest = value[len(digits):].replace("%", "%%")
+    if "," in digits:
+        return "{:,}" + value[len(digits):].replace("{", "{{").replace("}", "}}")
+    if isinstance(number, float):
+        return "%%.%df" % len(digits.split(".")[1]) + rest
+    return "%d" + rest
+
+
+def _slug(unit, taken):
+    base = re.sub(r"[^a-z0-9]+", "_", (unit or "figure").lower()).strip("_")
+    base = base or "figure"
+    slug, n = base, 2
+    while slug in taken:
+        slug, n = "%s_%d" % (base, n), n + 1
+    taken.add(slug)
+    return slug
+
+
+def suggest(root, files, ledger=None, today=None):
+    """(draft claims, report lines). Nothing is written by this function."""
+    root = pathlib.Path(root)
+    today = (today or datetime.date.today()).isoformat()
+    existing = []
+    if ledger is not None and pathlib.Path(ledger).exists():
+        existing = load(ledger)
+    taken = set(c.get("id") for c in existing)
+    drafts, report = [], []
+    for relative in files:
+        path = root / relative
+        if not path.is_file():
+            report.append("skip  %s: not a file" % relative)
+            continue
+        with io.open(str(path), encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+        pinned = set(c.get("value") for c in existing
+                     if relative in (c.get("appears_in") or []))
+        seen = set()
+        for lineno, value, number, unit in find_candidates(text):
+            where = "%s:%d" % (relative, lineno)
+            # Contained in a pinned value, on number boundaries: "293 tests"
+            # inside "293 tests over 6 files", but never "3 tests" inside
+            # "138 tests".
+            inside = re.compile(r"(?<![\d.,])%s(?![\d])" % re.escape(value))
+            if any(inside.search(done) for done in pinned):
+                report.append("pinned  %-24s %s" % (where, value))
+                continue
+            if value in seen:
+                continue
+            seen.add(value)
+            claim = {
+                "id": _slug(unit, taken),
+                "claim": "TODO: what this number is",
+                "value": value,
+                "status": "unconfirmed",
+                "anchor": "TODO: where a reader goes to check it",
+                "checked_on": today,
+                "appears_in": [relative],
+            }
+            if unit:
+                claim["near"] = [unit]
+            source = propose_source(root, number, unit)
+            if source:
+                claim["format"] = _format_for(value, number)
+                claim["derive"] = source
+                claim["status"] = "measured"
+                claim["durable"] = "read from source on every verify"
+                claim["todo"] = ("found a source that reproduces %s - confirm "
+                                 "it is the right one, fill in claim and "
+                                 "anchor, then delete this line" % value)
+                report.append("source  %-24s %s  <- %s" % (
+                    where, value, source["files"][0]))
+            else:
+                claim["todo"] = ("no source found - add derive, raw with "
+                                 "format, or evidence; fill in claim, anchor "
+                                 "and recheck_by; or delete this claim if "
+                                 "the number is not one")
+                report.append("draft   %-24s %s" % (where, value))
+            drafts.append(claim)
+    return drafts, report
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="docclaims",
@@ -1113,6 +1346,15 @@ def main(argv=None):
     stale_cmd.add_argument("projects", nargs="+")
     stale_cmd.add_argument("--asof", default=None)
     stale_cmd.add_argument("--ledger", default="claims.json")
+
+    suggest_cmd = sub.add_parser(
+        "suggest", help="draft claims for the numbers in a file, for review")
+    suggest_cmd.add_argument("files", nargs="*", default=["README.md"])
+    suggest_cmd.add_argument("--root", default=".")
+    suggest_cmd.add_argument("--ledger", default=None,
+                             help="existing ledger; its pinned values are skipped")
+    suggest_cmd.add_argument("--out", default=None,
+                             help="write drafts here instead of stdout")
 
     render_cmd = sub.add_parser("render", help="the grade block")
     render_cmd.add_argument("project")
@@ -1174,6 +1416,34 @@ def main(argv=None):
                      claim.get("recheck_by"), claim.get("claim", "")))
         print("%d claims past their horizon as of %s" % (len(rows), asof))
         return 1 if (rows or failed) else 0
+
+    if args.command == "suggest":
+        root = pathlib.Path(args.root)
+        ledger = pathlib.Path(args.ledger) if args.ledger else root / "claims.json"
+        try:
+            drafts, report = suggest(root, args.files, ledger)
+        except LedgerError as exc:
+            print("FAIL  ledger         %s" % exc)
+            return 1
+        document = json.dumps({"claims": drafts}, indent=2, ensure_ascii=False)
+        if args.out:
+            target = pathlib.Path(args.out)
+            if target.exists():
+                # Drafts written over a reviewed ledger would erase the review.
+                print("FAIL  %s exists; drafts are never written over a "
+                      "ledger - pass a new path and merge by hand" % target)
+                return 1
+            with io.open(str(target), "w", encoding="utf-8") as handle:
+                handle.write(document + "\n")
+        for line in report:
+            print(line, file=sys.stderr if not args.out else sys.stdout)
+        if not args.out:
+            print(document)
+        found = len([d for d in drafts if "derive" in d])
+        print("%d drafts, %d with a source that reproduces the number; every "
+              "draft fails verify until its todo is deleted"
+              % (len(drafts), found), file=sys.stderr if not args.out else sys.stdout)
+        return 0
 
     if args.command == "render":
         root = pathlib.Path(args.project)

@@ -59,6 +59,37 @@ the README to say 6 and it fails there instead. Leave a stale "5" in one
 sentence while fixing another, and the contradiction scan catches the one you
 missed.
 
+## Starting a ledger: `docclaims suggest`
+
+Writing `claims.json` by hand for an existing README is the slow part, so
+`suggest` drafts it:
+
+```
+$ cd examples/tiny && docclaims suggest README.md --ledger none.json
+source  README.md:5              5 times  <- src/limits.py
+draft   README.md:5              3 formats
+source  README.md:5              3 tests  <- tests/**/test_*.py
+3 drafts, 2 with a source that reproduces the number; every draft fails verify until its todo is deleted
+```
+
+It picks out numbers followed by a plural noun ("27 routes"), or with a `%`
+or `x`, and skips years, versions, URLs, list numbering, inline code and
+anything already pinned in the ledger. In code blocks it reads only comments,
+so terminal output doesn't flood it but `# 138 tests` beside a command is
+found.
+
+For each candidate it looks for a source. For a test count it tries both
+counting styles, and elsewhere it searches the code for a constant
+(`MAX_RETRIES = 5`). **A `derive` is proposed only if it was run and gave back
+the same number.** A plausible source that gives a different one is worse than
+none.
+
+**Every draft fails `verify` until a person has read it.** Each one carries a
+`todo`, which `verify` reports as "still a draft", so drafts can't pass
+unreviewed. Deleting a draft that isn't really a claim is part of the review.
+`--out` writes the drafts to a new file, and refuses to write over an existing
+ledger.
+
 ## Where a number can come from
 
 **Read from the source (`derive`).** Most numbers a README states about the
@@ -192,7 +223,7 @@ sure the assertion is stated, dated and consistent everywhere it appears.
 ## Development
 
 ```bash
-PYTHONPATH=. python -m unittest discover -s tests   # 138 tests
+PYTHONPATH=. python -m unittest discover -s tests   # 163 tests
 python docclaims.py verify . --scan "*.md"          # this README against its ledger
 ```
 

@@ -1280,6 +1280,198 @@ class Formats(TemporaryProject):
         self.assertEqual(claims._scaled(2, 3), 6)
         self.assertIs(claims._scaled(True, 3), True)
 
+SUGGEST_README = """# widget
+
+It retries at most 5 times and ships 3 tests. About 12.5% of rows are dropped.
+Started in 2019; this is version 1.2.3. See https://example.com/9-items or
+`limit = 11 items`. It is 40 and counting.
+
+1. Install it
+2. Run 6 checks by hand
+
+```
+$ widget --count
+14 rows written
+widget --selftest   # 8 cases
+```
+
+The pinned figure: 99 widgets.
+"""
+
+
+class Suggest(TemporaryProject):
+    """Drafting a ledger: the right candidates, real sources, and never a pass."""
+
+    def setUp(self):
+        TemporaryProject.setUp(self)
+        write(self.root, "README.md", SUGGEST_README)
+        write(self.root, "src/config.py", "MAX_RETRIES = 5\nTIMEOUT = 30\n")
+        write(self.root, "tests/test_widget.py",
+              "def test_a():\n    pass\n\ndef test_b():\n    pass\n\n"
+              "def test_c():\n    pass\n")
+        self.put_ledger([a_claim(id="widgets", value="99 widgets",
+                                 appears_in=["README.md"])])
+
+    def values(self):
+        drafts, _ = claims.suggest(self.root, ["README.md"],
+                                   self.root / "claims.json")
+        return {d["value"]: d for d in drafts}
+
+    def test_it_finds_numbers_with_units_and_percentages(self):
+        found = self.values()
+        for value in ("5 times", "3 tests", "12.5%", "6 checks"):
+            self.assertIn(value, found)
+
+    def test_it_skips_the_noise(self):
+        found = " ".join(self.values())
+        for noise in ("2019", "1.2", "9", "11 items", "40", "14 rows"):
+            self.assertNotIn(noise, found.split(" ") + list(self.values()),
+                             noise)
+        self.assertNotIn("14 rows", self.values())
+        self.assertNotIn("11 items", self.values())
+        self.assertNotIn("9-items", " ".join(self.values()))
+
+    def test_a_number_in_a_code_comment_is_a_candidate(self):
+        drafts, report = claims.suggest(self.root, ["README.md"],
+                                        self.root / "claims.json")
+        self.assertTrue(any("README.md:13" in line and "8 cases" in line
+                            for line in report), report)
+
+    def test_a_pinned_value_is_skipped(self):
+        self.assertNotIn("99 widgets", self.values())
+
+    def test_a_constant_that_reproduces_the_number_is_proposed(self):
+        draft = self.values()["5 times"]
+        self.assertEqual(draft["derive"]["files"], ["src/config.py"])
+        self.assertEqual(draft["format"], "%d times")
+        self.assertEqual(claims.derive_number(self.root, draft["derive"]), 5)
+
+    def test_a_test_count_is_proposed_only_when_it_reproduces(self):
+        draft = self.values()["3 tests"]
+        self.assertEqual(draft["derive"]["tests"], "pytest")
+        write(self.root, "tests/test_widget.py", "def test_a():\n    pass\n")
+        self.assertNotIn("derive", self.values()["3 tests"])
+
+    def test_no_source_means_no_derive(self):
+        draft = self.values()["12.5%"]
+        self.assertNotIn("derive", draft)
+        self.assertEqual(draft["status"], "unconfirmed")
+
+    def test_every_draft_fails_verify_until_its_todo_is_deleted(self):
+        drafts, _ = claims.suggest(self.root, ["README.md"],
+                                   self.root / "claims.json")
+        self.put_ledger(drafts)
+        found = claims.verify(self.root)[1]
+        drafted = set(f.claim_id for f in found
+                      if f.fatal and "still a draft" in f.message)
+        self.assertEqual(drafted, set(d["id"] for d in drafts))
+
+    def test_a_reviewed_sourced_draft_verifies(self):
+        draft = dict(self.values()["5 times"])
+        del draft["todo"]
+        draft["claim"] = "Retries on a failed request"
+        draft["anchor"] = "MAX_RETRIES in src/config.py"
+        self.put_ledger([draft])
+        self.assertEqual(self.fatal_kinds(claims.verify(self.root)[1]), [])
+
+    def test_the_command_line_never_overwrites_a_ledger(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = claims.main(["suggest", "README.md", "--root", str(self.root),
+                                "--out", str(self.root / "claims.json")])
+        self.assertEqual(code, 1)
+        self.assertIn("never written over a ledger", out.getvalue())
+        self.assertIn("99 widgets", (self.root / "claims.json").read_text())
+
+    def test_the_command_line_writes_drafts_to_a_new_file(self):
+        target = self.root / "drafts.json"
+        with redirect_stdout(io.StringIO()):
+            code = claims.main(["suggest", "README.md", "--root", str(self.root),
+                                "--out", str(target)])
+        self.assertEqual(code, 0)
+        written = json.loads(target.read_text())["claims"]
+        self.assertTrue(written)
+        self.assertTrue(all(d.get("todo") for d in written))
+
+    def test_a_thousands_separator_gets_a_brace_format(self):
+        self.assertEqual(claims._format_for("37,583 respondents", 37583),
+                         "{:,} respondents")
+        self.assertEqual(claims._format_for("12.5%", 12.5), "%.1f%%")
+        self.assertEqual(claims._format_for("5 times", 5), "%d times")
+
+    def test_ids_are_unique(self):
+        drafts, _ = claims.suggest(self.root, ["README.md"],
+                                   self.root / "claims.json")
+        ids = [d["id"] for d in drafts]
+        self.assertEqual(len(ids), len(set(ids)))
+
+
+class Units(unittest.TestCase):
+    """What counts as a unit, pinned with the real noise that shaped the rule."""
+
+    def values(self, text):
+        return [c[1] for c in claims.find_candidates(text)]
+
+    def test_a_percentage_takes_no_unit(self):
+        self.assertEqual(self.values("slid 15% against yours"), ["15%"])
+        self.assertEqual(self.values("about 2.5x faster"), ["2.5x"])
+
+    def test_verbs_and_adjectives_after_a_number_are_not_units(self):
+        text = "150 have one, 20 positioned, 18 real, 2 could, 16 tracked"
+        self.assertEqual(self.values(text), [])
+
+    def test_plural_nouns_are_units(self):
+        self.assertEqual(self.values("27 routes and 160 currencies"),
+                         ["27 routes", "160 currencies"])
+
+    def test_one_takes_a_singular_unit(self):
+        self.assertEqual(self.values("exactly 1 failure"), ["1 failure"])
+
+    def test_a_thousands_separator_is_kept(self):
+        self.assertEqual(self.values("from 37,583 respondents"),
+                         ["37,583 respondents"])
+
+
+class SuggestEdges(TemporaryProject):
+    """Found by mutation testing the suggest code."""
+
+    def values(self, text):
+        return [c[1] for c in claims.find_candidates(text)]
+
+    def test_grammar_words_that_end_in_s_are_not_units(self):
+        self.assertEqual(self.values("3 is enough, and 4 was too many"), [])
+
+    def test_a_past_tense_after_one_is_not_a_unit(self):
+        self.assertEqual(self.values("exactly 1 drifted"), [])
+
+    def test_the_year_range_is_inclusive_and_separators_are_not_years(self):
+        self.assertEqual(self.values("1900 rows, 2099 rows"), [])
+        self.assertEqual(self.values("1899 rows, 2100 rows, 2,019 rows"),
+                         ["1899 rows", "2100 rows", "2,019 rows"])
+
+    def test_every_comment_on_a_code_line_is_read(self):
+        text = "```\nrun   # 8 cases # 3 items\n```\n"
+        self.assertEqual(self.values(text), ["8 cases", "3 items"])
+
+    def test_a_constant_in_a_non_source_file_is_not_proposed(self):
+        write(self.root, "NOTES.md", "MAX_RETRIES = 5\n")
+        self.assertIsNone(claims.propose_source(self.root, 5, "times"))
+        write(self.root, "src/config.py", "MAX_RETRIES = 5\n")
+        self.assertEqual(claims.propose_source(self.root, 5, "times")["files"],
+                         ["src/config.py"])
+
+    def test_ids_count_up_from_two_and_a_bare_figure_has_a_name(self):
+        taken = set()
+        self.assertEqual([claims._slug("tests", taken) for _ in range(3)],
+                         ["tests", "tests_2", "tests_3"])
+        self.assertEqual(claims._slug(None, taken), "figure")
+        self.assertEqual(claims._slug("---", taken), "figure_2")
+
+    def test_suggest_runs_with_no_ledger_at_all(self):
+        write(self.root, "README.md", "It has 4 modes.\n")
+        drafts, _ = claims.suggest(self.root, ["README.md"], None)
+        self.assertEqual([d["value"] for d in drafts], ["4 modes"])
+
 
 if __name__ == "__main__":
     unittest.main()
