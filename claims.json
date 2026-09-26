@@ -88,7 +88,7 @@
     {
       "id": "release_tag",
       "claim": "The release the Action and pre-commit examples pin, which CI tags from __version__",
-      "value": "v0.3.2",
+      "value": "v0.3.3",
       "status": "measured",
       "anchor": "__version__ in docclaims.py; the tag job in .github/workflows/ci.yml creates the tag",
       "checked_on": "2026-09-26",

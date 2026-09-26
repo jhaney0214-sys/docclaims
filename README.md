@@ -180,7 +180,7 @@ As a GitHub Action, one step:
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: jhaney0214-sys/docclaims@v0.3.2
+- uses: jhaney0214-sys/docclaims@v0.3.3
   with:
     path: .                 # where claims.json lives
     scan: "**/*.md docs/*.html"
@@ -207,7 +207,7 @@ With [pre-commit](https://pre-commit.com), in `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/jhaney0214-sys/docclaims
-    rev: v0.3.2
+    rev: v0.3.3
     hooks:
       - id: docclaims
 ```

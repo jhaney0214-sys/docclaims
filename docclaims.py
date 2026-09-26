@@ -1,3 +1,30 @@
+# SPDX-License-Identifier: MIT
+#
+# This notice is here so that a copy of this one file, which the README
+# offers as a way to use it, carries its licence with it.
+#
+# MIT License
+#
+# Copyright (c) 2026 Jhane
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """docclaims - the numbers your README states, checked against where they come from.
 
 A number written into a document is a claim that nothing re-runs. "120 tests",
@@ -91,7 +118,7 @@ Standard library only, one file, Python 3.8 or later. Copying this file into a
 repository is a supported way to use it.
 """
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 import argparse
 import ast
