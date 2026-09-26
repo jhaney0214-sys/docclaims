@@ -6,6 +6,8 @@ name: ci
 on:
   push:
   pull_request:
+  # Run by hand, e.g. to tag a release whose push-triggered run never started.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -66,7 +68,7 @@ jobs:
   # already exists is never moved: later commits that keep the version are
   # the same release's fixes, not a new one.
   tag:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [test, action]
     runs-on: ubuntu-latest
     permissions:
