@@ -1,0 +1,17 @@
+tests: "pytest" against pytest --collect-only, per file
+project: packaging 24.1 sdist, tests/ run with PYTHONPATH=src
+docclaims 0.2.0, pytest 9.1.1, Python 3.11.15
+
+agree    test_elffile.py          pytest     15   docclaims     15
+agree    test_manylinux.py        pytest     32   docclaims     32
+refused  test_markers.py          pytest   2225   test_parses_valid is parametrized over something that is not a literal list, so its count cannot be read without running pytest
+refused  test_metadata.py         pytest    187   test_non_repeating_fields_only_once is parametrized over something that is not a literal list, so its count cannot be read without running pytest
+agree    test_musllinux.py        pytest     10   docclaims     10
+refused  test_requirements.py     pytest   5286   test_equal_reqs_equal_hashes is parametrized over something that is not a literal list, so its count cannot be read without running pytest
+refused  test_specifiers.py       pytest    799   test_specifiers_valid is parametrized over something that is not a literal list, so its count cannot be read without running pytest
+agree    test_structures.py       pytest     14   docclaims     14
+agree    test_tags.py             pytest    170   docclaims    170
+agree    test_utils.py            pytest     52   docclaims     52
+refused  test_version.py          pytest  18064   test_valid_versions is parametrized over something that is not a literal list, so its count cannot be read without running pytest
+
+6 files agree, 293 tests; 0 differ; 5 refused

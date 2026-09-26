@@ -975,13 +975,13 @@ class Derived(TemporaryProject):
                                 "tests": "python"})
         self.assertIn("derived", self.fatal_kinds(self.verify(claim)))
 
-    def test_a_capture_that_is_not_a_number_fails(self):
+    def test_a_capture_that_is_not_a_number_is_kept_as_text(self):
         write(self.root, "tests/AutoTest.gd", "const EXPECTED_CHECKS := many\n")
-        claim = a_count(derive={"files": ["tests/AutoTest.gd"],
+        write(self.root, "CLAUDE.md", "many checks.\n")
+        claim = a_count(value="many checks", format="%s checks",
+                        derive={"files": ["tests/AutoTest.gd"],
                                 "capture": r"EXPECTED_CHECKS := (\w+)"})
-        found = [f for f in self.verify(claim) if f.kind == "derived"]
-        self.assertTrue(found and found[0].fatal, found)
-        self.assertIn("not a number", found[0].message)
+        self.assertEqual(claims.check_derived([claim], self.root), [])
 
     def test_a_decimal_capture_is_read_as_a_decimal(self):
         write(self.root, "tests/AutoTest.gd", "const EXPECTED_CHECKS := 2.5\n")
@@ -1096,6 +1096,189 @@ class Edges(unittest.TestCase):
         html = claims.render([a_claim()], "html")
         self.assertEqual(html.count('class="claim-status"'), 1)
         self.assertIn('<td class="claim-status">measured</td>', html)
+
+PYTEST_SUITE = {
+    "test_plain.py": """
+import pytest
+import unittest
+
+def test_one():
+    pass
+
+async def test_async_one():
+    pass
+
+def helper_not_a_test():
+    pass
+
+@pytest.mark.parametrize("n", [1, 2, 3])
+def test_three_cases(n):
+    pass
+
+@pytest.mark.parametrize("a", [1, 2])
+@pytest.mark.parametrize("b", (10, 20, 30))
+def test_stacked(a, b):
+    pass
+
+@pytest.mark.parametrize(argvalues=[1, 2], argnames="x")
+def test_keyword_argvalues(x):
+    pass
+
+class TestGroup:
+    def test_method(self):
+        pass
+
+    @pytest.mark.parametrize("n", [1, 2])
+    def test_param_method(self, n):
+        pass
+
+    def helper(self):
+        pass
+
+    class TestNested:
+        def test_inner(self):
+            pass
+
+@pytest.mark.parametrize("k", [1, 2])
+class TestParamClass:
+    def test_a(self, k):
+        pass
+
+    def test_b(self, k):
+        pass
+
+class TestWithInit:
+    def __init__(self):
+        pass
+
+    def test_never_collected(self):
+        pass
+
+class NotATestGroup:
+    def test_ignored(self):
+        pass
+
+class Legacy(unittest.TestCase):
+    def test_legacy_one(self):
+        pass
+
+    def test_legacy_two(self):
+        pass
+""",
+}
+
+#: Counted by hand from PYTEST_SUITE, and checked against pytest itself below:
+#: 1 + 1 + 3 + 6 + 2 + (1 + 2 + 1) + (2 * 2) + 0 + 0 + 2
+PYTEST_EXPECTED = 23
+
+
+class PytestCounting(TemporaryProject):
+    """`tests: "pytest"` against what pytest's own collector finds."""
+
+    def setUp(self):
+        TemporaryProject.setUp(self)
+        for name, text in PYTEST_SUITE.items():
+            write(self.root, "tests/" + name, text)
+
+    def count(self):
+        return claims.derive_number(
+            self.root, {"files": ["tests/test_*.py"], "tests": "pytest"})
+
+    def test_the_hand_count(self):
+        self.assertEqual(self.count(), PYTEST_EXPECTED)
+
+    def test_unittest_style_counting_undercounts_the_same_suite(self):
+        # The gap this mode exists for: module-level functions are invisible
+        # to the unittest rule.
+        python = claims.derive_number(
+            self.root, {"files": ["tests/test_*.py"], "tests": "python"})
+        self.assertLess(python, PYTEST_EXPECTED)
+
+    def test_it_agrees_with_pytest_collect_only(self):
+        try:
+            import pytest  # noqa: F401
+        except ImportError:
+            self.skipTest("pytest is not installed")
+        import subprocess
+        import sys
+        out = subprocess.run(
+            [sys.executable, "-m", "pytest", "--collect-only", "-q",
+             "-p", "no:cacheprovider", str(self.root / "tests")],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            universal_newlines=True, cwd=str(self.root)).stdout
+        collected = [line for line in out.splitlines() if "::" in line]
+        self.assertEqual(len(collected), self.count(), out)
+
+    def test_a_parametrize_over_a_variable_fails_rather_than_guessing(self):
+        write(self.root, "tests/test_dynamic.py",
+              "import pytest\nCASES = [1, 2]\n"
+              "@pytest.mark.parametrize('n', CASES)\n"
+              "def test_dynamic(n):\n    pass\n")
+        with self.assertRaises(claims.NotDerived) as caught:
+            self.count()
+        self.assertIn("not a literal list", str(caught.exception))
+        self.assertIn("test_dynamic.py", str(caught.exception))
+
+    def test_the_spec_accepts_pytest_and_names_both_styles(self):
+        found = claims.check_schema([a_count(
+            derive={"files": ["tests/*.py"], "tests": "nose"})])
+        message = " ".join(f.message for f in found)
+        self.assertIn("python", message)
+        self.assertIn("pytest", message)
+        self.assertEqual(
+            claims.check_schema([a_count(
+                derive={"files": ["tests/*.py"], "tests": "pytest"})]), [])
+
+
+class Formats(TemporaryProject):
+    """Text captures, `{}` formats, and a scale that leaves text alone."""
+
+    def test_a_version_is_captured_as_text(self):
+        write(self.root, "pyproject.toml", 'version = "0.1.1"\n')
+        write(self.root, "README.md", "Version 0.1.1 is current.\n")
+        claim = a_count(id="version", value="Version 0.1.1", format="Version %s",
+                        derive={"files": ["pyproject.toml"],
+                                "capture": r'^version = "([^"]+)"'},
+                        appears_in=["README.md"], near=["current"])
+        self.put_ledger([claim])
+        self.assertEqual(self.fatal_kinds(claims.verify(self.root)[1]), [])
+        write(self.root, "pyproject.toml", 'version = "0.2.0"\n')
+        found = [f for f in claims.verify(self.root)[1] if f.fatal]
+        self.assertEqual([f.kind for f in found], ["derived"])
+        self.assertIn("Version 0.2.0", found[0].message)
+
+    def test_text_given_a_numeric_format_fails_with_a_reason(self):
+        write(self.root, "pyproject.toml", 'version = "0.1.1"\n')
+        claim = a_count(id="version", value="0", format="%d",
+                        derive={"files": ["pyproject.toml"],
+                                "capture": r'^version = "([^"]+)"'})
+        found = claims.check_derived([claim], self.root)
+        self.assertEqual(len(found), 1)
+        self.assertIn("cannot render", found[0].message)
+
+    def test_a_brace_format_writes_a_thousands_separator(self):
+        write(self.root, "data.json", '{"n": 37583}\n')
+        claim = a_count(id="n", value="37,583 respondents",
+                        format="{:,} respondents",
+                        derive={"files": ["data.json"],
+                                "capture": r'"n": (\d+)'})
+        self.assertEqual(claims.check_derived([claim], self.root), [])
+
+    def test_a_brace_format_works_for_raw_values_too(self):
+        claim = a_claim(value="12.5%", raw=0.1249733141, scale=100,
+                        format="{:.1f}%")
+        self.assertEqual(claims.rendered_value(claim), "12.5%")
+        self.assertEqual(claims.check_rounding([claim]), [])
+
+    def test_a_broken_brace_format_is_a_finding_not_a_crash(self):
+        claim = a_claim(format="{0} and {1}")
+        found = claims.check_rounding([claim])
+        self.assertEqual([f.kind for f in found], ["rounding"])
+
+    def test_scale_never_repeats_text(self):
+        self.assertEqual(claims._scaled("0.1.1", 3), "0.1.1")
+        self.assertEqual(claims._scaled(2, 3), 6)
+        self.assertIs(claims._scaled(True, 3), True)
 
 
 if __name__ == "__main__":

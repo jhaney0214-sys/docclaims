@@ -4,16 +4,64 @@
     {
       "id": "test_count",
       "claim": "Tests in the suite",
-      "value": "127 tests",
+      "value": "138 tests",
       "format": "%d tests",
-      "derive": {"files": ["tests/test_*.py"], "tests": "python"},
+      "derive": {
+        "files": [
+          "tests/test_*.py"
+        ],
+        "tests": "python"
+      },
       "status": "measured",
       "anchor": "test methods in tests/, counted by parsing",
       "checked_on": "2026-09-25",
       "durable": "read from source on every verify",
-      "appears_in": ["README.md"],
-      "near": ["unittest discover"],
+      "appears_in": [
+        "README.md"
+      ],
+      "near": [
+        "unittest discover"
+      ],
       "window": 80
+    },
+    {
+      "id": "pytest_agreement",
+      "claim": "Tests in the files where tests: \"pytest\" matched pytest's own collection",
+      "value": "293 tests over 6 files",
+      "notes": "Recheck when count_pytest_tests or pytest's collection rules change.",
+      "status": "measured",
+      "checked_on": "2026-09-26",
+      "recheck_by": "2027-03-31",
+      "appears_in": [
+        "README.md"
+      ],
+      "evidence": {
+        "file": "notes/pytest-crosscheck.txt",
+        "line": "6 files agree, 293 tests; 0 differ; 5 refused"
+      },
+      "anchor": "notes/pytest-crosscheck.txt: count_pytest_tests against pytest --collect-only, file by file, on the packaging 24.1 sdist",
+      "near": [
+        "packaging"
+      ]
+    },
+    {
+      "id": "pytest_refused",
+      "claim": "Files tests: \"pytest\" refused to count because they parametrize over variables",
+      "value": "the 5 that parametrize",
+      "status": "measured",
+      "checked_on": "2026-09-26",
+      "recheck_by": "2027-03-31",
+      "appears_in": [
+        "README.md"
+      ],
+      "evidence": {
+        "file": "notes/pytest-crosscheck.txt",
+        "line": "6 files agree, 293 tests; 0 differ; 5 refused"
+      },
+      "anchor": "notes/pytest-crosscheck.txt: count_pytest_tests against pytest --collect-only, file by file, on the packaging 24.1 sdist",
+      "near": [
+        "packaging"
+      ]
     }
   ]
 }

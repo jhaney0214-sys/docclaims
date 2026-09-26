@@ -68,7 +68,22 @@ project itself are already written in the code. docclaims reads them:
 | --- | --- |
 | `{"files": [...], "capture": "regex"}` | the one group of a regex that matches exactly once across the files. Twice is ambiguous, and it fails rather than picking one |
 | `{"files": [...], "count": "regex"}` | how many times a line-anchored regex matches |
-| `{"files": [...], "tests": "python"}` | test methods on classes, counted by parsing, so a test file embedded in a string as a fixture is not counted |
+| `{"files": [...], "tests": "python"}` | test methods on classes, the way unittest's loader finds them, counted by parsing, so a test file embedded in a string as a fixture is not counted |
+| `{"files": [...], "tests": "pytest"}` | what pytest's default collection finds: module-level `test*` functions, `test*` methods on `Test*` classes without an `__init__` (nested ones too), and `unittest.TestCase` methods. `@pytest.mark.parametrize` over a literal list counts once per case, stacked decorators multiply. Parametrizing over a variable fails with the function's name rather than guessing |
+
+A `capture` that isn't a number is kept as text, so a version such as
+`"0.1.1"` can be pinned with `"format": "v%s"`.
+
+`format` is `%`-style, or `{}`-style when it contains a brace. The second can
+write what the first can't, such as a thousands separator:
+`"format": "{:,} respondents"` renders 37583 as "37,583 respondents".
+
+`tests: "pytest"` was checked against `pytest --collect-only` on the
+`packaging` project's own suite: every file it could count matched exactly
+(293 tests over 6 files), and the 5 that parametrize over variables were
+refused. It doesn't see parametrized fixtures or custom collection hooks. A
+suite that relies on those should record `pytest --collect-only` output in a
+committed file and anchor the claim with `evidence` instead.
 
 A glob that matches no files fails. It never reads as zero, because a test
 directory that moved would otherwise report "0 tests" and render cleanly.
@@ -177,7 +192,7 @@ sure the assertion is stated, dated and consistent everywhere it appears.
 ## Development
 
 ```bash
-PYTHONPATH=. python -m unittest discover -s tests   # 127 tests
+PYTHONPATH=. python -m unittest discover -s tests   # 138 tests
 python docclaims.py verify . --scan "*.md"          # this README against its ledger
 ```
 

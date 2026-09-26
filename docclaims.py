@@ -61,7 +61,13 @@ already, and can be read:
 the files; twice is ambiguous and fails. `count` counts matches, line-anchored.
 `tests: "python"` counts test methods on classes by parsing, not grepping,
 because a test file that embeds a test file as a fixture string would count
-tests that do not exist. A glob that matches nothing fails rather than reading
+tests that do not exist. `tests: "pytest"` counts what pytest's default
+collection finds, parametrize cases included, and fails rather than guess when
+a case list is not a literal.
+
+A `capture` that is not a number is kept as text, for versions. `format` is
+`%`-style, or `{}`-style when it contains a brace, which is how a thousands
+separator is written: `{:,}`. A glob that matches nothing fails rather than reading
 as zero. A derived claim takes `format` and no `raw`: the source is the number,
 and a second copy of it in the ledger is what drifts.
 
@@ -84,7 +90,7 @@ Standard library only, one file, Python 3.8 or later. Copying this file into a
 repository is a supported way to use it.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 import argparse
 import ast
@@ -476,10 +482,11 @@ def _check_derive_spec(claim_id, claim, derive):
     for field in sorted(unknown):
         findings.append(Finding(
             "schema", claim_id, "unknown `derive` field %r" % field))
-    if derive.get("tests") not in (None, "python"):
+    if derive.get("tests") not in (None,) + TEST_STYLES:
         findings.append(Finding(
             "schema", claim_id,
-            "`derive.tests` knows only \"python\", not %r" % derive["tests"]))
+            "`derive.tests` is one of %s, not %r"
+            % (", ".join(TEST_STYLES), derive["tests"])))
     for mode in ("capture", "count"):
         if mode in derive:
             try:
@@ -517,6 +524,88 @@ def find_project(root, name):
                 if child.is_dir() and child.name.lower() == name.lower():
                     return child
     return None
+
+
+#: How `derive.tests` can count. "python" is unittest's loader: test methods on
+#: classes. "pytest" is pytest's default collection, which unittest's rule
+#: undercounts badly - most pytest suites are module-level functions.
+TEST_STYLES = ("python", "pytest")
+
+
+class NotStatic(Exception):
+    """A count that cannot be read without running the code."""
+
+
+def _parametrize_cases(function):
+    """How many cases stacked `@pytest.mark.parametrize` decorators make.
+
+    Counted only over a literal list or tuple. Anything else - a variable, a
+    call, a comprehension - raises NotStatic, because guessing a count is the
+    failure this tool exists to prevent.
+    """
+    cases = 1
+    for decorator in function.decorator_list:
+        if not isinstance(decorator, ast.Call):
+            continue
+        target = decorator.func
+        name = target.attr if isinstance(target, ast.Attribute) else \
+            getattr(target, "id", "")
+        if name != "parametrize":
+            continue
+        values = decorator.args[1] if len(decorator.args) > 1 else next(
+            (k.value for k in decorator.keywords if k.arg == "argvalues"), None)
+        if not isinstance(values, (ast.List, ast.Tuple)):
+            raise NotStatic(
+                "%s is parametrized over something that is not a literal list, "
+                "so its count cannot be read without running pytest"
+                % function.name)
+        cases *= len(values.elts)
+    return cases
+
+
+def _is_testcase(node):
+    return any((getattr(base, "attr", None) or getattr(base, "id", "")
+                ).endswith("TestCase") for base in node.bases)
+
+
+def _pytest_class_tests(node, outer_cases=1):
+    """Tests pytest collects from one class, and from classes nested in it."""
+    methods = [item for item in node.body
+               if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    if _is_testcase(node):
+        # unittest classes are collected by any name; parametrize does not
+        # apply to them.
+        return len([m for m in methods if m.name.startswith("test")])
+    if not node.name.startswith("Test") or any(m.name == "__init__"
+                                                for m in methods):
+        return 0   # pytest skips a Test class with a constructor
+    cases = outer_cases * _parametrize_cases(node)
+    total = sum(cases * _parametrize_cases(m) for m in methods
+                if m.name.startswith("test"))
+    for item in node.body:
+        if isinstance(item, ast.ClassDef):
+            total += _pytest_class_tests(item, cases)
+    return total
+
+
+def count_pytest_tests(text):
+    """Tests pytest's default collection finds in one file, parametrize included.
+
+    Module-level `test*` functions, `test*` methods on `Test*` classes that
+    have no `__init__` (nested ones too), and every `test*` method of a
+    `unittest.TestCase` subclass. Parametrized fixtures and custom collection
+    hooks are not seen; a suite that uses them should count with
+    `pytest --collect-only` and anchor the claim with `evidence` instead.
+    """
+    tree = ast.parse(text)
+    total = 0
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and node.name.startswith("test"):
+            total += _parametrize_cases(node)
+        elif isinstance(node, ast.ClassDef):
+            total += _pytest_class_tests(node)
+    return total
 
 
 def count_python_tests(text):
@@ -569,12 +658,16 @@ def derive_number(root, derive):
             texts.append((path, handle.read()))
 
     if "tests" in derive:
+        counter = count_pytest_tests if derive["tests"] == "pytest" \
+            else count_python_tests
         total = 0
         for path, text in texts:
             try:
-                total += count_python_tests(text)
+                total += counter(text)
             except SyntaxError as exc:
                 raise NotDerived("%s does not parse: %s" % (path.name, exc))
+            except NotStatic as exc:
+                raise NotDerived("%s: %s" % (path.name, exc))
         return total
     if "count" in derive:
         pattern = re.compile(derive["count"], re.MULTILINE)
@@ -584,12 +677,33 @@ def derive_number(root, derive):
     if len(hits) != 1:
         raise NotDerived("`capture` must match exactly once and matched %d "
                          "times" % len(hits))
+    # A number when it is one; otherwise the text as captured, so a version
+    # like "0.1.1" or "3.8" can be pinned with a `%s` format. A numeric format
+    # given text fails at rendering and says so.
     for kind in (int, float):
         try:
             return kind(hits[0])
         except ValueError:
             pass
-    raise NotDerived("`capture` read %r, which is not a number" % hits[0])
+    return hits[0]
+
+
+def apply_format(fmt, value):
+    """`fmt % value`, or `fmt.format(value)` when fmt uses `{}` fields.
+
+    Both, because `%` cannot write a thousands separator and a README very
+    often does: "37,583 respondents" needs `{:,} respondents`.
+    """
+    if "{" in fmt:
+        return fmt.format(value)
+    return fmt % value
+
+
+def _scaled(value, scale):
+    """Scale a number; leave text alone rather than repeating it."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value * scale
+    return value
 
 
 def check_derived(claims, root):
@@ -607,8 +721,9 @@ def check_derived(claims, root):
                                     fatal=exc.fatal))
             continue
         try:
-            rendered = claim["format"] % (number * claim.get("scale", 1))
-        except (TypeError, ValueError) as exc:
+            rendered = apply_format(claim["format"],
+                                    _scaled(number, claim.get("scale", 1)))
+        except (TypeError, ValueError, IndexError, KeyError) as exc:
             findings.append(Finding(
                 "derived", claim_id, "format %r cannot render %r: %s"
                 % (claim["format"], number, exc)))
@@ -632,10 +747,8 @@ def rendered_value(claim):
     the comparison against the engine needs the scale applied in the project's
     own test, which is the code this is trying to stop every project writing.
     """
-    raw = claim["raw"]
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        raw = raw * claim.get("scale", 1)
-    return claim["format"] % raw
+    return apply_format(claim["format"],
+                        _scaled(claim["raw"], claim.get("scale", 1)))
 
 
 def check_rounding(claims):
@@ -652,7 +765,7 @@ def check_rounding(claims):
         claim_id = claim.get("id", "?")
         try:
             rendered = rendered_value(claim)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, IndexError, KeyError) as exc:
             findings.append(Finding(
                 "rounding", claim_id,
                 "format %r cannot render raw %r: %s"

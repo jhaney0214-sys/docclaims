@@ -20,6 +20,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # pytest is not a dependency of docclaims. It is installed here only so
+      # the test comparing `tests: "pytest"` with pytest's own collector runs
+      # instead of skipping.
+      - name: pytest, for the collection cross-check
+        run: python -m pip install pytest
       - name: Tests
         run: PYTHONPATH=. python -m unittest discover -s tests
       - name: The README's own numbers
