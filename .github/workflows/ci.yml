@@ -31,3 +31,30 @@ jobs:
         run: python docclaims.py verify . --scan "*.md"
       - name: The worked example
         run: python docclaims.py verify examples/tiny --scan "*.md"
+
+  # The action, used the way another repository would use it. It has to pass
+  # on the clean example and FAIL on a copy with a number that has drifted:
+  # an action that cannot fail checks nothing.
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clean example passes
+        uses: ./
+        with:
+          path: examples/tiny
+          scan: "*.md"
+      - name: Make the example drift
+        run: |
+          cp -r examples/tiny /tmp/drifted
+          sed -i 's/MAX_RETRIES = 5/MAX_RETRIES = 7/' /tmp/drifted/src/limits.py
+      - name: Drifted example fails
+        id: drifted
+        continue-on-error: true
+        uses: ./
+        with:
+          path: /tmp/drifted
+          scan: ""
+      - name: The drifted run must have failed
+        run: test "${{ steps.drifted.outcome }}" = "failure"
+

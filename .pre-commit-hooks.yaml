@@ -1,0 +1,9 @@
+# Runs on every commit, not only when a claims file changes: a count moves
+# when the code it is read from moves, and that is the commit to stop.
+- id: docclaims
+  name: docclaims verify
+  description: Check the numbers a README states against where they come from.
+  entry: docclaims verify .
+  language: python
+  pass_filenames: false
+  always_run: true

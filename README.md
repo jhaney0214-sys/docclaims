@@ -176,13 +176,45 @@ changelog full of superseded numbers.
 
 ## In CI
 
+As a GitHub Action, one step:
+
 ```yaml
-- name: The README's numbers
-  run: python docclaims.py verify . --scan "**/*.md" "docs/*.html"
+- uses: actions/checkout@v4
+- uses: jhaney0214-sys/docclaims@v0.3.1
+  with:
+    path: .                 # where claims.json lives
+    scan: "**/*.md docs/*.html"
+```
+
+`scan` is a space-separated list of globs for the coverage sweep. Leave it
+empty to skip the sweep. This repository's own CI runs the action twice: on
+the clean example, where it must pass, and on a copy where one number has
+drifted, where it must fail.
+
+Or without the action, in any CI:
+
+```yaml
+- run: python docclaims.py verify . --scan "**/*.md" "docs/*.html"
 ```
 
 Everything except `raw`-against-your-code is text against text, so this runs
 on a runner that can't build or import your project at all.
+
+## Before each commit
+
+With [pre-commit](https://pre-commit.com), in `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/jhaney0214-sys/docclaims
+    rev: v0.3.1
+    hooks:
+      - id: docclaims
+```
+
+It runs on every commit, not only when `claims.json` changes, because a count
+moves when the code it's read from moves, and that's the commit to stop. Pass
+`args: [--scan, "*.md"]` to sweep for unpinned copies too.
 
 ## Other commands
 

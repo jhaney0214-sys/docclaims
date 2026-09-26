@@ -91,7 +91,7 @@ Standard library only, one file, Python 3.8 or later. Copying this file into a
 repository is a supported way to use it.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 import argparse
 import ast

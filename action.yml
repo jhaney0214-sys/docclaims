@@ -1,0 +1,40 @@
+name: docclaims
+description: Check the numbers your README states against where they come from.
+branding:
+  icon: check-square
+  color: green
+
+inputs:
+  path:
+    description: Directory holding claims.json.
+    default: "."
+  scan:
+    description: >-
+      Space-separated globs swept for files that quote a claim without being
+      pinned to it. Empty to skip the sweep.
+    default: "**/*.md"
+  python-version:
+    description: Python to run it with. Any 3.8 or later.
+    default: "3.x"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: docclaims verify
+      shell: bash
+      # Inputs travel as environment variables, not interpolated into the
+      # script, so a glob or path can never be read as shell syntax.
+      env:
+        DOCCLAIMS_PATH: ${{ inputs.path }}
+        DOCCLAIMS_SCAN: ${{ inputs.scan }}
+      run: |
+        set -f  # globs go to docclaims, not to the shell
+        args=(verify "$DOCCLAIMS_PATH")
+        if [ -n "$DOCCLAIMS_SCAN" ]; then
+          read -r -a globs <<< "$DOCCLAIMS_SCAN"
+          args+=(--scan "${globs[@]}")
+        fi
+        python "$GITHUB_ACTION_PATH/docclaims.py" "${args[@]}"
