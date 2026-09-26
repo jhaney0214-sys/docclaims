@@ -1,5 +1,6 @@
 # Runs the tests on every supported Python, then checks this repository's own
-# README against its own ledger. Nothing here uploads or deploys anything.
+# README against its own ledger. The one thing it writes is a version tag, and
+# only from main once everything else has passed. Nothing is uploaded or deployed.
 name: ci
 
 on:
@@ -58,3 +59,32 @@ jobs:
       - name: The drifted run must have failed
         run: test "${{ steps.drifted.outcome }}" = "failure"
 
+
+  # A version that reaches main green is tagged, so the README's
+  # `docclaims@vX.Y.Z` and `rev: vX.Y.Z` resolve. The tag is read from
+  # __version__, and the ledger pins the README to the same value. A tag that
+  # already exists is never moved: later commits that keep the version are
+  # the same release's fixes, not a new one.
+  tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, action]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag this version if it is new
+        run: |
+          set -eu
+          tag="v$(python3 -c 'import docclaims; print(docclaims.__version__)')"
+          if existing=$(git rev-parse -q --verify "refs/tags/$tag^{commit}"); then
+            echo "$tag already exists at $existing; left where it is"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "docclaims $tag" "$GITHUB_SHA"
+          git push origin "refs/tags/$tag"
+          echo "tagged $tag at $GITHUB_SHA"

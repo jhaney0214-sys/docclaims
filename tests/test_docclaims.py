@@ -389,6 +389,21 @@ class Shapes(unittest.TestCase):
         self.assertTrue(shape.search("$91,000"))
         self.assertIsNone(shape.search("58,000 copies"))
 
+    def test_a_version_matches_itself_and_other_versions(self):
+        """Read as numbers, "0.3.1" was 0.3 then ".1", and the shape could
+        match nothing at all, so a stale version beside the right one was
+        never reported. Found when this repository pinned its own release."""
+        shape = claims.shape_of("v0.3.1")
+        self.assertTrue(shape.search("uses: x@v0.3.1"))
+        self.assertTrue(shape.search("rev: v0.3.0"))
+        self.assertTrue(shape.search("v1.10.2"))
+
+    def test_a_version_holds_how_many_parts_it_has(self):
+        shape = claims.shape_of("v0.3.1")
+        self.assertIsNone(shape.search("actions/checkout@v4"))
+        self.assertIsNone(shape.search("v0.3 only"))
+        self.assertIsNone(shape.search("v0.3.1.4"))
+
 
 class Windows(unittest.TestCase):
 
@@ -562,6 +577,18 @@ class Prose(TemporaryProject):
         findings = claims.check_prose([claim], self.root)
         self.assertEqual(self.fatal_kinds(findings), ["contradiction"])
         self.assertIn("44 places of 90", findings[0].message)
+
+    def test_a_stale_version_beside_the_right_one_is_caught(self):
+        claim = a_claim(id="release", value="v0.3.1", format="v%s",
+                        near=["rev:"])
+        for key in ("raw", "scale"):
+            claim.pop(key, None)
+        claim["derive"] = {"files": ["m.py"], "capture": '^V = "(.+)"'}
+        write(self.root, "README.md",
+              "uses: x@v0.3.1\n\n    rev: v0.3.0\n")
+        findings = claims.check_prose([claim], self.root)
+        self.assertEqual(self.fatal_kinds(findings), ["contradiction"])
+        self.assertIn("v0.3.0", findings[0].message)
 
     def test_a_finding_carries_the_surrounding_sentence(self):
         """A character offset into normalised text helps nobody find it."""

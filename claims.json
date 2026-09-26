@@ -4,7 +4,7 @@
     {
       "id": "test_count",
       "claim": "Tests in the suite",
-      "value": "163 tests",
+      "value": "166 tests",
       "format": "%d tests",
       "derive": {
         "files": [
@@ -82,6 +82,29 @@
           "docclaims.py"
         ],
         "capture": "^\\s*(?:const\\s+|export\\s+const\\s+)?DEFAULT_WINDOW\\s*(?::\\s*\\w+\\s*)?[:=]=?\\s*(\\d+)"
+      },
+      "durable": "read from source on every verify"
+    },
+    {
+      "id": "release_tag",
+      "claim": "The release the Action and pre-commit examples pin, which CI tags from __version__",
+      "value": "v0.3.2",
+      "status": "measured",
+      "anchor": "__version__ in docclaims.py; the tag job in .github/workflows/ci.yml creates the tag",
+      "checked_on": "2026-09-26",
+      "appears_in": [
+        "README.md"
+      ],
+      "near": [
+        "docclaims@",
+        "rev:"
+      ],
+      "format": "v%s",
+      "derive": {
+        "files": [
+          "docclaims.py"
+        ],
+        "capture": "^__version__ = \"([^\"]+)\""
       },
       "durable": "read from source on every verify"
     }
