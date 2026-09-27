@@ -279,6 +279,9 @@ python docclaims.py verify . --scan "*.md"          # this README against its le
 This README's own test count is pinned in `claims.json`, and CI fails if it
 drifts. So is the release the examples above pin, read from `__version__`.
 When a new version reaches `main` with CI green, CI tags it; an existing tag
-is never moved.
+is never moved. Publishing a GitHub release from that tag uploads it to PyPI
+(`.github/workflows/release.yml`, through PyPI's trusted publishing, so no
+token is stored) and is the same step that lists the action on the
+Marketplace.
 
 MIT licence. See `LICENSE`.
