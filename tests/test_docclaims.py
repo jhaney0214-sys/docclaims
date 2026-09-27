@@ -1488,16 +1488,16 @@ class SuggestEdges(TemporaryProject):
                          ["src/config.py"])
 
     def test_a_labelled_line_of_a_committed_transcript_is_proposed(self):
-        """Found using docclaims on freshcite: its counts come from a scan summary."""
+        """Found using docclaims on a real project: its counts come from a scan summary."""
         write(self.root, "reports/summary.txt",
-              "articles read              1270\nreported                    364  (13.3%)\n"
-              "  newer                     154\nsilent:\n  newer                       9\n")
-        spec = claims.propose_source(self.root, 1270, "articles")
+              "records read              4180\nreported                    512  (12.2%)\n"
+              "  newer                     233\nsilent:\n  newer                       9\n")
+        spec = claims.propose_source(self.root, 4180, "records")
         self.assertEqual(spec["files"], ["reports/summary.txt"])
-        self.assertEqual(claims.derive_number(self.root, spec), 1270)
-        self.assertEqual(claims.derive_number(self.root, claims.propose_source(self.root, 364, "findings")), 364)
+        self.assertEqual(claims.derive_number(self.root, spec), 4180)
+        self.assertEqual(claims.derive_number(self.root, claims.propose_source(self.root, 512, "matches")), 512)
         # "newer" labels two lines, so neither can be read unambiguously.
-        self.assertIsNone(claims.propose_source(self.root, 154, "figures"))
+        self.assertIsNone(claims.propose_source(self.root, 233, "figures"))
         # A percentage, or a count under 10, matches some line by coincidence.
         write(self.root, "reports/more.txt", "mislabeled    7\nshare    42\n")
         self.assertIsNone(claims.propose_source(self.root, 7, "cases"))
