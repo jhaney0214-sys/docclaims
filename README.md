@@ -23,8 +23,10 @@ One file, standard library only, Python 3.8 or later, MIT licensed.
 ## Install
 
 ```bash
-pip install git+https://github.com/jhaney0214-sys/docclaims
+pip install docclaims
 ```
+
+(Or the latest from GitHub: `pip install git+https://github.com/jhaney0214-sys/docclaims`.)
 
 Or copy `docclaims.py` into your repository and run it with `python
 docclaims.py`. That is a supported way to use it: there is nothing to install
