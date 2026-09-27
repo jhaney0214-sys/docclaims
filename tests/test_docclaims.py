@@ -1487,6 +1487,25 @@ class SuggestEdges(TemporaryProject):
         self.assertEqual(claims.propose_source(self.root, 5, "times")["files"],
                          ["src/config.py"])
 
+    def test_a_labelled_line_of_a_committed_transcript_is_proposed(self):
+        """Found using docclaims on freshcite: its counts come from a scan summary."""
+        write(self.root, "reports/summary.txt",
+              "articles read              1270\nreported                    364  (13.3%)\n"
+              "  newer                     154\nsilent:\n  newer                       9\n")
+        spec = claims.propose_source(self.root, 1270, "articles")
+        self.assertEqual(spec["files"], ["reports/summary.txt"])
+        self.assertEqual(claims.derive_number(self.root, spec), 1270)
+        self.assertEqual(claims.derive_number(self.root, claims.propose_source(self.root, 364, "findings")), 364)
+        # "newer" labels two lines, so neither can be read unambiguously.
+        self.assertIsNone(claims.propose_source(self.root, 154, "figures"))
+        # A percentage, or a count under 10, matches some line by coincidence.
+        write(self.root, "reports/more.txt", "mislabeled    7\nshare    42\n")
+        self.assertIsNone(claims.propose_source(self.root, 7, "cases"))
+        self.assertIsNone(claims.propose_source(self.root, 42, None))
+        # Only transcripts: the same line in a README is prose, not a source.
+        write(self.root, "NOTES.md", "widgets made    77\n")
+        self.assertIsNone(claims.propose_source(self.root, 77, "widgets"))
+
     def test_ids_count_up_from_two_and_a_bare_figure_has_a_name(self):
         taken = set()
         self.assertEqual([claims._slug("tests", taken) for _ in range(3)],

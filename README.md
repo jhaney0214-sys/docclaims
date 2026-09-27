@@ -80,7 +80,10 @@ found.
 
 For each candidate it looks for a source. For a test count it tries both
 counting styles, and elsewhere it searches the code for a constant
-(`MAX_RETRIES = 5`). **A `derive` is proposed only if it was run and gave back
+(`MAX_RETRIES = 5`). For a count of 10 or more that no constant holds, it
+tries labelled lines of committed transcripts (`.txt`, `.log`, `.out`), such
+as `articles read   1270` in a summary a script printed; a label that
+appears twice is skipped as ambiguous. **A `derive` is proposed only if it was run and gave back
 the same number.** A plausible source that gives a different one is worse than
 none.
 
@@ -180,7 +183,7 @@ As a GitHub Action, one step:
 
 ```yaml
 - uses: actions/checkout@v4
-- uses: jhaney0214-sys/docclaims@v0.3.3
+- uses: jhaney0214-sys/docclaims@v0.4.0
   with:
     path: .                 # where claims.json lives
     scan: "**/*.md docs/*.html"
@@ -200,6 +203,20 @@ Or without the action, in any CI:
 Everything except `raw`-against-your-code is text against text, so this runs
 on a runner that can't build or import your project at all.
 
+## A badge
+
+Run the check as its own workflow, and its status is a badge that says the
+README's numbers were checked on the last push. In
+`.github/workflows/docclaims.yml`, the two steps above; in the README:
+
+```markdown
+[![numbers checked by docclaims](https://github.com/OWNER/REPO/actions/workflows/docclaims.yml/badge.svg)](https://github.com/jhaney0214-sys/docclaims)
+```
+
+[freshcite](https://github.com/jhaney0214-sys/freshcite) does this: every
+count its README states is read from a committed scan summary, and the badge
+is green only while they agree.
+
 ## Before each commit
 
 With [pre-commit](https://pre-commit.com), in `.pre-commit-config.yaml`:
@@ -207,7 +224,7 @@ With [pre-commit](https://pre-commit.com), in `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/jhaney0214-sys/docclaims
-    rev: v0.3.3
+    rev: v0.4.0
     hooks:
       - id: docclaims
 ```
@@ -255,7 +272,7 @@ sure the assertion is stated, dated and consistent everywhere it appears.
 ## Development
 
 ```bash
-PYTHONPATH=. python -m unittest discover -s tests   # 166 tests
+PYTHONPATH=. python -m unittest discover -s tests   # 167 tests
 python docclaims.py verify . --scan "*.md"          # this README against its ledger
 ```
 

@@ -118,7 +118,7 @@ Standard library only, one file, Python 3.8 or later. Copying this file into a
 repository is a supported way to use it.
 """
 
-__version__ = "0.3.3"
+__version__ = "0.4.0"
 
 import argparse
 import ast
@@ -1282,6 +1282,45 @@ def propose_source(root, number, unit):
                     return spec
             except NotDerived:
                 continue      # the name is assigned twice: ambiguous, skip it
+    # A transcript is tried only for a count of something, 10 or more. Its
+    # labelled lines are full of small numbers, and "7%" in a README matched
+    # a "mislabeled 7" line by coincidence the first time this ran.
+    if unit and number >= 10:
+        return _transcript_source(root, number)
+    return None
+
+
+#: Committed output of a run: a summary a script printed, a log.
+TRANSCRIPT_SUFFIXES = (".txt", ".log", ".out")
+
+
+def _transcript_source(root, number):
+    """A `capture` from a labelled line of a committed transcript, such as
+    "articles read   1270", or None.
+
+    Found using docclaims on freshcite, whose README counts all come from a
+    scan: none were constants, so suggest proposed a source for none of them,
+    though each sat on a labelled line of a committed summary.
+    """
+    line = re.compile(r"^\s*([A-Za-z][\w ,()'/-]*?[A-Za-z)])\s*[:=]?\s+%d(?![\d.,])"
+                      % number, re.MULTILINE)
+    for path in sorted(pathlib.Path(root).rglob("*")):
+        if any(part in SKIP_DIRS for part in path.parts) or not path.is_file() \
+                or path.suffix not in TRANSCRIPT_SUFFIXES or path.stat().st_size >= 1000000:
+            continue
+        try:
+            with io.open(str(path), encoding="utf-8") as handle:
+                text = handle.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for match in line.finditer(text):
+            spec = {"files": [path.relative_to(root).as_posix()],
+                    "capture": r"^\s*%s\s*[:=]?\s+(\d+)(?![\d.,])" % re.escape(match.group(1))}
+            try:
+                if derive_number(root, spec) == number:
+                    return spec
+            except NotDerived:
+                continue      # the label repeats: ambiguous, skip it
     return None
 
 
