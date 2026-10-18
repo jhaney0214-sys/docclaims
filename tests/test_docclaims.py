@@ -986,6 +986,27 @@ class Derived(TemporaryProject):
         write(self.root, "b.gd", "")
         self.assertEqual(self.fatal_kinds(self.verify(claim)), ["derived"])
 
+    def test_json_reads_a_value_or_a_length_and_fails_on_a_missing_path(self):
+        write(self.root, "data/q.json",
+              '{"questions": [{"id": 1}, {"id": 2}, {"id": 3}], "meta": {"n.max": 7, "ok": true}}')
+        write(self.root, "CLAUDE.md", "3 checks.\n")
+        claim = a_count(value="3 checks", derive={"files": ["data/*.json"], "json": "questions"})
+        self.assertEqual(self.fatal_kinds(self.verify(claim)), [])
+        self.assertEqual(claims.derive_number(self.root, {"files": ["data/q.json"], "json": "questions.1.id"}), 2)
+        self.assertEqual(claims.derive_number(self.root, {"files": ["data/q.json"], "json": ["meta", "n.max"]}), 7)
+        write(self.root, "data/q.json", '{"questions": [{"id": 1}]}')
+        self.assertEqual(self.fatal_kinds(self.verify(claim)), ["derived"])
+        for path in ("answers", "questions.5", "meta.ok"):
+            with self.assertRaises(claims.NotDerived):
+                claims.derive_number(self.root, {"files": ["data/q.json"], "json": path})
+
+    def test_json_reads_exactly_one_file(self):
+        write(self.root, "a.json", "[1]")
+        write(self.root, "b.json", "[1, 2]")
+        with self.assertRaises(claims.NotDerived):
+            claims.derive_number(self.root, {"files": ["*.json"], "json": ""})
+        self.assertEqual(claims.derive_number(self.root, {"files": ["b.json"], "json": ""}), 2)
+
     def test_python_tests_are_counted_by_parsing_not_by_grep(self):
         # A grep for `def test` finds four here; unittest runs two.
         write(self.root, "tests/test_a.py", PYTHON_TESTS)

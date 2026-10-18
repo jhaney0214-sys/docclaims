@@ -84,6 +84,7 @@ already, and can be read:
     "derive": {"files": ["tests/test_*.py"], "tests": "python"}
     "derive": {"files": ["src/config.py"], "capture": "^MAX_RETRIES = (\\\\d+)"}
     "derive": {"files": ["rules/*.yaml"], "count": "^- id:"}
+    "derive": {"files": ["data/questions.json"], "json": "questions"}
 
 `capture` takes the one group of a regex that must match exactly once across
 the files; twice is ambiguous and fails. `count` counts matches, line-anchored.
@@ -91,7 +92,9 @@ the files; twice is ambiguous and fails. `count` counts matches, line-anchored.
 because a test file that embeds a test file as a fixture string would count
 tests that do not exist. `tests: "pytest"` counts what pytest's default
 collection finds, parametrize cases included, and fails rather than guess when
-a case list is not a literal.
+a case list is not a literal. `json` follows a dotted path into one JSON file
+(a list index is a number, and a list of keys spells a key with a dot in it)
+and reads the value there, or its length when it is a list or an object.
 
 A `capture` that is not a number is kept as text, for versions. `format` is
 `%`-style, or `{}`-style when it contains a brace, which is how a thousands
@@ -508,7 +511,7 @@ def check_schema(claims):
     return findings
 
 
-DERIVE_MODES = ("capture", "count", "tests")
+DERIVE_MODES = ("capture", "count", "tests", "json")
 
 
 def _check_derive_spec(claim_id, claim, derive):
@@ -551,6 +554,13 @@ def _check_derive_spec(claim_id, claim, derive):
                 findings.append(Finding(
                     "schema", claim_id,
                     "`derive.capture` needs exactly one group, the number"))
+    if "json" in derive:
+        path = derive["json"]
+        if not (isinstance(path, str) or (isinstance(path, list) and all(
+                isinstance(k, (str, int)) and not isinstance(k, bool) for k in path))):
+            findings.append(Finding(
+                "schema", claim_id,
+                "`derive.json` is a dotted path, or a list of keys and indexes"))
     if "format" not in claim:
         findings.append(Finding(
             "schema", claim_id,
@@ -723,6 +733,8 @@ def derive_number(root, derive):
     if "count" in derive:
         pattern = re.compile(derive["count"], re.MULTILINE)
         return sum(len(pattern.findall(text)) for _p, text in texts)
+    if "json" in derive:
+        return read_json_path(texts, derive["json"])
     pattern = re.compile(derive["capture"], re.MULTILINE)
     hits = [m.group(1) for _p, text in texts for m in pattern.finditer(text)]
     if len(hits) != 1:
@@ -737,6 +749,39 @@ def derive_number(root, derive):
         except ValueError:
             pass
     return hits[0]
+
+
+def read_json_path(texts, path):
+    """The value at `path` in the one JSON file of `texts`, or the length of a
+    list or object found there. A path that is not there fails; it never reads
+    as zero, any more than a glob that matches nothing does."""
+    if len(texts) != 1:
+        raise NotDerived("`json` reads one file and the globs matched %d" % len(texts))
+    name, text = texts[0][0].name, texts[0][1]
+    try:
+        node = json.loads(text)
+    except ValueError as exc:
+        raise NotDerived("%s is not JSON: %s" % (name, exc))
+    keys = path if isinstance(path, list) else [k for k in path.split(".") if k != ""]
+    walked = []
+    for key in keys:
+        walked.append(str(key))
+        if isinstance(node, list):
+            try:
+                node = node[int(key)]
+                continue
+            except (ValueError, IndexError):
+                pass
+        elif isinstance(node, dict) and str(key) in node:
+            node = node[str(key)]
+            continue
+        raise NotDerived("%s has nothing at %s" % (name, ".".join(walked)))
+    if isinstance(node, (list, dict)):
+        return len(node)
+    if isinstance(node, bool) or node is None:
+        raise NotDerived("%s holds %s at %s, which is not a number or text"
+                         % (name, json.dumps(node), ".".join(walked) or "its root"))
+    return node
 
 
 def apply_format(fmt, value):

@@ -104,6 +104,7 @@ project itself are already written in the code. docclaims reads them:
 | --- | --- |
 | `{"files": [...], "capture": "regex"}` | the one group of a regex that matches exactly once across the files. Twice is ambiguous, and it fails rather than picking one |
 | `{"files": [...], "count": "regex"}` | how many times a line-anchored regex matches |
+| `{"files": [...], "json": "path.to.value"}` | the value at a dotted path in one JSON file, or the length of the list or object there: `"questions"` gives how many questions a file holds. A list index is a number (`"runs.0.score"`); a list of keys (`["meta", "n.max"]`) spells a key that has a dot in it. A path that is not there fails |
 | `{"files": [...], "tests": "python"}` | test methods on classes, the way unittest's loader finds them, counted by parsing, so a test file embedded in a string as a fixture is not counted |
 | `{"files": [...], "tests": "pytest"}` | what pytest's default collection finds: module-level `test*` functions, `test*` methods on `Test*` classes without an `__init__` (nested ones too), and `unittest.TestCase` methods. `@pytest.mark.parametrize` over a literal list counts once per case, stacked decorators multiply. Parametrizing over a variable fails with the function's name rather than guessing |
 
@@ -274,7 +275,7 @@ sure the assertion is stated, dated and consistent everywhere it appears.
 ## Development
 
 ```bash
-PYTHONPATH=. python -m unittest discover -s tests   # 167 tests
+PYTHONPATH=. python -m unittest discover -s tests   # 169 tests
 python docclaims.py verify . --scan "*.md"          # this README against its ledger
 ```
 
