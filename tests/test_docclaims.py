@@ -986,6 +986,72 @@ class Derived(TemporaryProject):
         write(self.root, "b.gd", "")
         self.assertEqual(self.fatal_kinds(self.verify(claim)), ["derived"])
 
+    def _workflow_project(self, run):
+        write(self.root, "tests/test_a.py", "import unittest\nclass A(unittest.TestCase):\n"
+              "    def test_1(self): pass\n    def test_2(self): pass\n")
+        write(self.root, "tests/test_b.py", "import unittest\nclass B(unittest.TestCase):\n"
+              "    def test_1(self): pass\n")
+        write(self.root, "tests/test_c.py", "import unittest\nclass C(unittest.TestCase):\n"
+              "    def test_1(self): pass\n    def test_2(self): pass\n    def test_3(self): pass\n")
+        write(self.root, ".github/workflows/ci.yml",
+              "jobs:\n  test:\n    steps:\n      - name: Tests\n        run: |\n" + run)
+
+    def test_a_workflow_count_follows_the_workflow_not_a_copied_list(self):
+        # The incident: a pin listed four files while CI ran six. Here the
+        # workflow gains a module and the count moves with it.
+        self._workflow_project("          python -m unittest tests.test_a \\\n"
+                               "                             tests.test_b -v\n")
+        derive = {"workflow": ".github/workflows/ci.yml", "tests": "python"}
+        self.assertEqual(claims.derive_number(self.root, derive), 3)
+        self._workflow_project("          python -m unittest tests.test_a \\\n"
+                               "                             tests.test_b tests/test_c.py -v\n")
+        self.assertEqual(claims.derive_number(self.root, derive), 6)
+
+    def test_a_workflow_claim_passes_and_fails_like_any_derived_claim(self):
+        self._workflow_project("          python -m unittest tests.test_a tests.test_b\n")
+        write(self.root, "CLAUDE.md", "CI runs 3 checks.\n")
+        claim = a_count(value="3 checks",
+                        derive={"workflow": ".github/workflows/ci.yml", "tests": "python"})
+        self.assertEqual(self.fatal_kinds(self.verify(claim)), [])
+        self._workflow_project("          python -m unittest tests.test_a tests.test_c\n")
+        self.assertEqual(self.fatal_kinds(self.verify(claim)), ["derived"])
+
+    def test_what_a_workflow_count_cannot_know_is_refused(self):
+        derive = {"workflow": ".github/workflows/ci.yml", "tests": "python"}
+        for run, says in (
+                ("          python -m unittest discover -s tests\n", "discover"),
+                ("          python -m unittest tests.test_a.A\n", "only A"),
+                ("          python -m unittest tests.test_gone\n", "not a file"),
+                ("          python -m unittest ${{ matrix.suite }}\n", "${{ }}"),
+                ("          echo nothing to run\n", "no `python -m unittest`")):
+            self._workflow_project(run)
+            with self.assertRaises(claims.NotDerived) as cm:
+                claims.derive_number(self.root, derive)
+            self.assertIn(says, str(cm.exception), run)
+        with self.assertRaises(claims.NotDerived) as cm:
+            claims.derive_number(self.root, dict(derive, workflow=".github/workflows/gone.yml"))
+        self.assertIn("not found", str(cm.exception))
+
+    def test_a_pytest_workflow_reads_files_folders_and_skips_flag_values(self):
+        self._workflow_project("          pytest tests/test_a.py tests -k slow -q\n")
+        write(self.root, "tests/test_b.py", "def test_x(): pass\ndef test_y(): pass\n")
+        write(self.root, "tests/test_c.py", "def test_z(): pass\n")
+        derive = {"workflow": ".github/workflows/ci.yml", "tests": "pytest"}
+        # test_a.py named directly and again through the folder counts once.
+        self.assertEqual(claims.derive_number(self.root, derive), 2 + 2 + 1)
+        self._workflow_project("          python -m pytest tests/test_a.py::A::test_1\n")
+        with self.assertRaises(claims.NotDerived):
+            claims.derive_number(self.root, derive)
+
+    def test_a_workflow_derive_is_checked_as_a_schema(self):
+        for derive, says in (
+                ({"workflow": ".github/workflows/ci.yml", "count": "x"}, "needs `tests`"),
+                ({"workflow": "ci.yml", "files": ["x"], "tests": "python"}, "not both"),
+                ({"workflow": "", "tests": "python"}, "one workflow file")):
+            self.put_ledger([a_count(derive=derive)])
+            messages = [f.message for f in claims.verify(self.root)[1] if f.kind == "schema"]
+            self.assertTrue(any(says in m for m in messages), (derive, messages))
+
     def test_json_reads_a_value_or_a_length_and_fails_on_a_missing_path(self):
         write(self.root, "data/q.json",
               '{"questions": [{"id": 1}, {"id": 2}, {"id": 3}], "meta": {"n.max": 7, "ok": true}}')

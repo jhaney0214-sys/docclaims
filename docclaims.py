@@ -85,6 +85,7 @@ already, and can be read:
     "derive": {"files": ["src/config.py"], "capture": "^MAX_RETRIES = (\\\\d+)"}
     "derive": {"files": ["rules/*.yaml"], "count": "^- id:"}
     "derive": {"files": ["data/questions.json"], "json": "questions"}
+    "derive": {"workflow": ".github/workflows/ci.yml", "tests": "python"}
 
 `capture` takes the one group of a regex that must match exactly once across
 the files; twice is ambiguous and fails. `count` counts matches, line-anchored.
@@ -522,7 +523,21 @@ def _check_derive_spec(claim_id, claim, derive):
                         "`derive` is an object: files, and one of %s"
                         % ", ".join(DERIVE_MODES))]
     files = derive.get("files")
-    if not isinstance(files, list) or not files \
+    workflow = derive.get("workflow")
+    if workflow is not None:
+        # The test files a workflow runs, in place of a list of globs.
+        if files is not None:
+            findings.append(Finding(
+                "schema", claim_id,
+                "`derive` takes `files` or `workflow`, not both"))
+        if not isinstance(workflow, str) or not workflow:
+            findings.append(Finding(
+                "schema", claim_id, "`derive.workflow` is the path of one workflow file"))
+        if "tests" not in derive:
+            findings.append(Finding(
+                "schema", claim_id,
+                "`derive.workflow` counts the tests a workflow runs, so it needs `tests`"))
+    elif not isinstance(files, list) or not files \
             or not all(isinstance(f, str) and f for f in files):
         findings.append(Finding(
             "schema", claim_id, "`derive` needs `files`, a list of globs"))
@@ -532,7 +547,7 @@ def _check_derive_spec(claim_id, claim, derive):
             "schema", claim_id,
             "`derive` takes exactly one of %s, and has %s"
             % (", ".join(DERIVE_MODES), ", ".join(modes) or "none")))
-    unknown = set(derive) - set(DERIVE_MODES) - {"files", "project"}
+    unknown = set(derive) - set(DERIVE_MODES) - {"files", "project", "workflow"}
     for field in sorted(unknown):
         findings.append(Finding(
             "schema", claim_id, "unknown `derive` field %r" % field))
@@ -695,6 +710,99 @@ class NotDerived(Exception):
         self.fatal = fatal
 
 
+# Flags that take the next token as their value, so it is not read as a path.
+_VALUE_FLAGS = {"-k", "-m", "-p", "-c", "-o", "-n", "-W", "-r",
+                "--rootdir", "--ignore", "--deselect", "--maxfail",
+                "--durations", "--junitxml", "--basetemp", "--confcutdir",
+                "--log-level", "--tb", "--import-mode", "--cov", "--cov-report"}
+_SHELL_STOPS = {";", "&&", "||", "|", "&"}
+
+
+def workflow_test_files(base, workflow, style):
+    """The test files a CI workflow's test commands name, as paths under base.
+
+    Read from the commands themselves, standard library only: every
+    `python -m unittest ...` (style "python") or `pytest ...` /
+    `python -m pytest ...` (style "pytest") in the file, with backslash
+    continuations joined. A pin on "the tests CI runs" then follows the
+    workflow instead of a hand-kept copy of its list, which is the copy that
+    goes stale: one read "four files" while CI ran six.
+
+    Anything that would make the count a guess is refused rather than
+    approximated: `unittest discover`, a `${{ }}` expression, a module that
+    names part of a file (`tests.test_x.SomeClass`, `path::test`), a name that
+    is not a file, or no matching command at all.
+    """
+    import shlex
+    path = base / workflow
+    if not path.is_file():
+        raise NotDerived("workflow %s not found; a source that moved must not "
+                         "read as zero" % workflow)
+    with io.open(str(path), encoding="utf-8", errors="replace") as handle:
+        text = re.sub(r"\\\r?\n\s*", " ", handle.read())
+    if style == "pytest":
+        command = re.compile(r"(?:^|[\s;&|(])(?:(?:python[0-9.]*|py)\s+-m\s+)?pytest\b(.*)")
+    else:
+        command = re.compile(r"(?:^|[\s;&|(])(?:python[0-9.]*|py)\s+-m\s+unittest\b(.*)")
+    found, commands = [], 0
+    for line in text.splitlines():
+        match = command.search(line)
+        if not match:
+            continue
+        commands += 1
+        rest = match.group(1)
+        if "${{" in rest:
+            raise NotDerived("%s: a test command uses a ${{ }} expression, so "
+                             "which tests it runs is not in the file" % workflow)
+        try:
+            tokens = shlex.split(rest, comments=True)
+        except ValueError as exc:
+            raise NotDerived("%s: cannot read a test command: %s" % (workflow, exc))
+        skip = False
+        for token in tokens:
+            if token in _SHELL_STOPS:
+                break
+            if skip:
+                skip = False
+                continue
+            if token.startswith("-"):
+                skip = token in _VALUE_FLAGS
+                continue
+            if style != "pytest" and token == "discover":
+                raise NotDerived("%s runs `unittest discover`; name the files "
+                                 "with `files` instead" % workflow)
+            found.append(_resolve_test_target(base, token, style, workflow))
+    if not commands:
+        raise NotDerived("%s has no %s command" % (
+            workflow, "pytest" if style == "pytest" else "`python -m unittest`"))
+    files = sorted({p for group in found for p in group})
+    if not files:
+        raise NotDerived("%s runs its tests without naming any files" % workflow)
+    return files
+
+
+def _resolve_test_target(base, token, style, workflow):
+    if "::" in token:
+        raise NotDerived("%s runs part of %s; a whole-file count would overstate it"
+                         % (workflow, token.split("::")[0]))
+    candidate = base / token
+    if candidate.is_file():
+        return [candidate]
+    if style == "pytest" and candidate.is_dir():
+        return sorted(set(candidate.rglob("test_*.py")) | set(candidate.rglob("*_test.py")))
+    if style != "pytest" and re.match(r"^[A-Za-z_][\w.]*$", token):
+        parts = token.split(".")
+        for cut in range(len(parts), 0, -1):
+            module = base.joinpath(*parts[:cut]).with_suffix(".py")
+            if module.is_file():
+                if cut < len(parts):
+                    raise NotDerived("%s runs only %s of %s; a whole-file count "
+                                     "would overstate it"
+                                     % (workflow, ".".join(parts[cut:]), module.name))
+                return [module]
+    raise NotDerived("%s names %s, which is not a file here" % (workflow, token))
+
+
 def derive_number(root, derive):
     """Read a claim's number out of files, or raise NotDerived saying why."""
     base = pathlib.Path(root)
@@ -706,13 +814,16 @@ def derive_number(root, derive):
                              % (derive["project"], base.resolve()),
                              fatal=False)
         base = found
-    paths = []
-    for pattern in derive["files"]:
-        paths.extend(p for p in base.glob(pattern) if p.is_file())
-    paths = sorted(set(paths))
-    if not paths:
-        raise NotDerived("%s matches no files; a source that moved must not "
-                         "read as zero" % ", ".join(derive["files"]))
+    if derive.get("workflow"):
+        paths = workflow_test_files(base, derive["workflow"], derive.get("tests"))
+    else:
+        paths = []
+        for pattern in derive["files"]:
+            paths.extend(p for p in base.glob(pattern) if p.is_file())
+        paths = sorted(set(paths))
+        if not paths:
+            raise NotDerived("%s matches no files; a source that moved must not "
+                             "read as zero" % ", ".join(derive["files"]))
     texts = []
     for path in paths:
         with io.open(str(path), encoding="utf-8", errors="replace") as handle:
