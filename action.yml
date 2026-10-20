@@ -20,9 +20,15 @@ inputs:
 runs:
   using: composite
   steps:
+    # The action's own Python, kept off the job's PATH: with setup-python's
+    # default, every step after this one in the caller's job ran on the
+    # action's Python instead of theirs (found in csp-hash-check, built the
+    # same way, 2026-10-19). It is called by its path below.
     - uses: actions/setup-python@v5
+      id: python
       with:
         python-version: ${{ inputs.python-version }}
+        update-environment: false
     - name: docclaims verify
       shell: bash
       # Inputs travel as environment variables, not interpolated into the
@@ -30,6 +36,7 @@ runs:
       env:
         DOCCLAIMS_PATH: ${{ inputs.path }}
         DOCCLAIMS_SCAN: ${{ inputs.scan }}
+        DOCCLAIMS_PYTHON: ${{ steps.python.outputs.python-path }}
       run: |
         set -f  # globs go to docclaims, not to the shell
         args=(verify "$DOCCLAIMS_PATH")
@@ -37,4 +44,4 @@ runs:
           read -r -a globs <<< "$DOCCLAIMS_SCAN"
           args+=(--scan "${globs[@]}")
         fi
-        python "$GITHUB_ACTION_PATH/docclaims.py" "${args[@]}"
+        "$DOCCLAIMS_PYTHON" "$GITHUB_ACTION_PATH/docclaims.py" "${args[@]}"
