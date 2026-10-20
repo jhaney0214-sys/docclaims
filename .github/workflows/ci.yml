@@ -42,6 +42,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # A caller's later steps must still run on the Python the caller set
+      # up. csp-hash-check's action, built the same way, replaced it with its
+      # own 3.x and a caller's tests then ran without numpy (2026-10-19).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Note the caller's Python
+        run: echo "CALLER_PY=$(command -v python) $(python --version)" >> "$GITHUB_ENV"
       - name: Clean example passes
         uses: ./
         with:
@@ -60,6 +68,12 @@ jobs:
           scan: ""
       - name: The drifted run must have failed
         run: test "${{ steps.drifted.outcome }}" = "failure"
+      - name: The action left the caller's Python alone
+        run: |
+          now="$(command -v python) $(python --version)"
+          echo "before: $CALLER_PY"
+          echo "after:  $now"
+          test "$now" = "$CALLER_PY"
 
 
   # A version that reaches main green is tagged, so the README's
